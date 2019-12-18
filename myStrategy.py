@@ -23,7 +23,7 @@ class PPO(nn.Module):
         super(PPO, self).__init__()
         self.data = []
 
-        self.fc1 = nn.Linear(4, 64)
+        self.fc1 = nn.Linear(5, 64)
         self.lstm = nn.LSTM(64, 32)
         self.fc_pi = nn.Linear(32, 3)
         self.fc_v = nn.Linear(32, 1)
@@ -105,7 +105,7 @@ class PPO(nn.Module):
             self.optimizer.step()
 
 
-feature_list = ["open", "high", "low", "close"]
+feature_list = ["open", "high", "low", "close", "volume"]
 transFee = 100
 capital = 500000
 
@@ -114,9 +114,11 @@ class TradingEnv:
     def __init__(self, dailyOhlcvFile, log_diff=False):
         self.dailyOhlcv = pd.read_csv(dailyOhlcvFile)
 
+        self.log_diff = log_diff
         if log_diff:
+            self.logDailyOhlcv = self.dailyOhlcv.copy(deep=True)
             for name in feature_list:
-                self.dailyOhlcv[name] = np.log(
+                self.logDailyOhlcv[name] = np.log(
                     self.dailyOhlcv[name]) - np.log(self.dailyOhlcv[name].shift(1))
 
         self.reset()
@@ -124,21 +126,18 @@ class TradingEnv:
     def reset(self):
         self.capital = capital
         self.hoding = 0
-        self.current_index = 0
+        self.cur_index = 0
 
-        observation = self.dailyOhlcv.loc[self.current_index,
-                                          feature_list].values
-        return observation
+        return self._observation(self.cur_index)
 
     def step(self, action):
-        self.current_index += 1
-        done = self.current_index >= len(self.dailyOhlcv)
+        self.cur_index += 1
+        done = self.cur_index >= len(self.dailyOhlcv)
 
         if not done:
-            observation = self.dailyOhlcv.loc[self.current_index,
-                                              feature_list].values
+            observation = self._observation(self.cur_index)
 
-            cur_price, next_price = self.dailyOhlcv.loc[self.current_index-1:self.current_index,
+            cur_price, next_price = self.dailyOhlcv.loc[self.cur_index-1:self.cur_index,
                                                         ["open"]].values.ravel().tolist()
             if action == 1 and self.capital > transFee:
                 self.hoding += (self.capital - transFee) / cur_price
@@ -154,11 +153,21 @@ class TradingEnv:
             observation = self.reset()
             reward = 0
 
-        info = {'capital':self.capital, 'holding':self.hoding}
+        info = {'capital': self.capital, 'holding': self.hoding}
         return observation, reward, done, info
 
     def _reward(self, cur_price, next_price):
-        return self.hoding * (next_price - cur_price) - transFee 
+        reward =  self.hoding * (next_price - cur_price) - transFee
+        return reward
+
+    def _observation(self, cur_index):
+        if self.log_diff:
+            observation = self.logDailyOhlcv.loc[cur_index,
+                                                 feature_list].values
+        else:
+            observation = self.dailyOhlcv.loc[cur_index,
+                                              feature_list].values
+        return observation
 
 
 def myStrategy(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
@@ -170,7 +179,7 @@ def myStrategy(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
 
 if __name__ == "__main__":
     dailyOhlcvFile = sys.argv[1]
-    env = TradingEnv(dailyOhlcvFile)
+    env = TradingEnv(dailyOhlcvFile, log_diff=False)
 
     done = False
     state = env.reset()
