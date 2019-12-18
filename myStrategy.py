@@ -10,6 +10,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.distributions import Categorical
 
+hidden_size = 32
 learning_rate = 1e-4
 gamma = 0.98
 lmbda = 0.95
@@ -17,32 +18,29 @@ eps_clip = 0.1
 K_epoch = 2
 T_horizon = 20
 
-
 class PPO(nn.Module):
     def __init__(self):
         super(PPO, self).__init__()
         self.data = []
 
-        self.fc1 = nn.Linear(5, 64)
-        self.lstm = nn.LSTM(64, 32)
-        self.fc_pi = nn.Linear(32, 3)
-        self.fc_v = nn.Linear(32, 1)
+        self.fc1 = nn.Linear(5, hidden_size)
+        self.lstm = nn.LSTM(hidden_size, hidden_size)
+        self.fc2 = nn.Linear(hidden_size, hidden_size)
+        self.fc_pi = nn.Linear(hidden_size, 3)
+        self.fc_v = nn.Linear(hidden_size, 1)
+        
         self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
 
-    def pi(self, x, hidden):
+    def forward(self, x, hidden):
         x = F.relu(self.fc1(x))
-        x = x.view(-1, 1, 64)
+        x = x.view(-1, 1, hidden_size)
         x, lstm_hidden = self.lstm(x, hidden)
-        x = self.fc_pi(x)
-        prob = F.softmax(x, dim=2)
-        return prob, lstm_hidden
-
-    def v(self, x, hidden):
-        x = F.relu(self.fc1(x))
-        x = x.view(-1, 1, 64)
-        x, lstm_hidden = self.lstm(x, hidden)
+        x = self.fc2(x)
+        
         v = self.fc_v(x)
-        return v
+        pi = self.fc_pi(x)
+        pi = F.softmax(pi, dim=2)
+        return pi, v, lstm_hidden
 
     def put_data(self, transition):
         self.data.append(transition)
