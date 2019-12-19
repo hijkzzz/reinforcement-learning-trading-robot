@@ -16,7 +16,7 @@ capital = 10000
 
 hidden_size = 64
 learning_rate = 1e-4
-gamma = 0.98
+gamma = 0.99
 lmbda = 0.95
 clip = 0.1
 ent = 1e-3
@@ -92,6 +92,7 @@ class PPO(nn.Module):
         self.fc1 = nn.Linear(len(feature_list), hidden_size)
         self.lstm = nn.LSTM(hidden_size, hidden_size)
         self.fc2 = nn.Linear(hidden_size, hidden_size)
+        
         self.fc_pi = nn.Linear(hidden_size, 3)
         self.fc_v = nn.Linear(hidden_size, 1)
 
@@ -107,11 +108,11 @@ class PPO(nn.Module):
         x = F.relu(self.fc1(x))
         x = x.view(-1, 1, hidden_size)
         x, lstm_hidden = self.lstm(x, hidden)
-        x = self.fc2(x)
-
-        v = self.fc_v(x)
+        x =  F.relu(self.fc2(x))
+        
         pi = self.fc_pi(x)
         pi = F.softmax(pi, dim=2)
+        v = self.fc_v(x)
         return pi, v, lstm_hidden
 
     def put_data(self, transition):
@@ -185,7 +186,7 @@ class PPO(nn.Module):
             loss = pi_loss + v_loss + ent_loss
             
             self.optimizer.zero_grad()
-            loss.backward()
+            loss.backward(retain_graph=True)
             self.optimizer.step()
             
             return pi_loss.item(), v_loss.item(), ent_loss.item()
