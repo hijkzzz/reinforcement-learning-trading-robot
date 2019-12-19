@@ -10,15 +10,78 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.distributions import Categorical
 
+feature_list = ["open", "high", "low", "close"]
+transFee = 100
+capital = 500000
+
 hidden_size = 32
 learning_rate = 1e-4
-gamma = 0.99
+gamma = 0.98
 lmbda = 0.95
 clip = 0.1
 ent = 1e-3
 epoch = 2
 steps = 128
-neps = 10000
+neps = 100000
+
+class TradingEnv:
+    def __init__(self, dailyOhlcvFile, log_diff=False):
+        self.dailyOhlcv = pd.read_csv(dailyOhlcvFile)
+
+        self.log_diff = log_diff
+        if log_diff:
+            self.logDailyOhlcv = self.dailyOhlcv.copy(deep=True)
+            for name in feature_list:
+                self.logDailyOhlcv[name] = np.log(
+                    self.dailyOhlcv[name]) - np.log(self.dailyOhlcv[name].shift(1))
+
+        self.reset()
+
+    def reset(self):
+        self.capital = capital
+        self.hoding = 0
+        self.cur_index = 0
+
+        return self._observation(self.cur_index)
+
+    def step(self, action):
+        self.cur_index += 1
+        done = self.cur_index >= len(self.dailyOhlcv)
+
+        if not done:
+            observation = self._observation(self.cur_index)
+
+            cur_price, next_price = self.dailyOhlcv.loc[self.cur_index-1:self.cur_index,
+                                                        ["open"]].values.ravel().tolist()
+            if action == 1 and self.capital > transFee:
+                self.hoding += (self.capital - transFee) / cur_price
+                self.capital = 0
+                reward = self._reward(cur_price, next_price)
+            elif action == -1 and self.hoding * cur_price > transFee:
+                self.capital += self.hoding * cur_price - transFee
+                self.hoding = 0
+                reward = self._reward(cur_price, next_price)
+            else:
+                reward = 0
+        else:
+            observation = self.reset()
+            reward = 0
+
+        info = {'capital': self.capital, 'holding': self.hoding}
+        return observation, reward, done, info
+
+    def _reward(self, cur_price, next_price):
+        reward = self.hoding * (next_price - cur_price) - transFee
+        return reward
+
+    def _observation(self, cur_index):
+        if self.log_diff:
+            observation = self.logDailyOhlcv.loc[cur_index,
+                                                 feature_list].values
+        else:
+            observation = self.dailyOhlcv.loc[cur_index,
+                                              feature_list].values
+        return observation.astype(np.float32)
 
 
 class PPO(nn.Module):
@@ -26,7 +89,7 @@ class PPO(nn.Module):
         super(PPO, self).__init__()
         self.data = []
 
-        self.fc1 = nn.Linear(5, hidden_size)
+        self.fc1 = nn.Linear(len(feature_list), hidden_size)
         self.lstm = nn.LSTM(hidden_size, hidden_size)
         self.fc2 = nn.Linear(hidden_size, hidden_size)
         self.fc_pi = nn.Linear(hidden_size, 3)
@@ -95,7 +158,7 @@ class PPO(nn.Module):
                 _, v_s_next, _ = self.forward(s_next, h_out)
                 td_target = r + gamma * v_s_next.squeeze(1) * done_mask
                 delta = td_target - v_s.squeeze(1)
-
+                
                 advantage_lst = []
                 advantage = 0.0
                 for t in range(len(delta) - 1, -1, -1):
@@ -116,11 +179,16 @@ class PPO(nn.Module):
             surr1 = ratio * advantage
             surr2 = torch.clamp(ratio, 1-clip, 1+clip) * advantage
             
-            loss = -torch.min(surr1, surr2) + F.smooth_l1_loss(v_s.flatten(), returns) + ent * -dist.entropy()
-
+            pi_loss = -torch.min(surr1, surr2).mean()
+            v_loss = F.smooth_l1_loss(v_s.flatten(), returns).mean()
+            ent_loss = ent * -dist.entropy().mean()
+            loss = pi_loss + v_loss + ent_loss
+            
             self.optimizer.zero_grad()
-            loss.mean().backward(retain_graph=True)
+            loss.backward(retain_graph=True)
             self.optimizer.step()
+            
+            return pi_loss.item(), v_loss.item(), ent_loss.item()
 
     def train(self):
         for n_epi in range(neps):
@@ -151,76 +219,11 @@ class PPO(nn.Module):
                     if done:
                         break
 
-                self.update_net()
+                loss_info = self.update_net()
 
             print("# of episode :{}, score : {:.1f}".format(
                 n_epi, score))
-
-
-feature_list = ["open", "high", "low", "close", "volume"]
-transFee = 100
-capital = 500000
-
-
-class TradingEnv:
-    def __init__(self, dailyOhlcvFile, log_diff=False):
-        self.dailyOhlcv = pd.read_csv(dailyOhlcvFile)
-
-        self.log_diff = log_diff
-        if log_diff:
-            self.logDailyOhlcv = self.dailyOhlcv.copy(deep=True)
-            for name in feature_list:
-                self.logDailyOhlcv[name] = np.log(
-                    self.dailyOhlcv[name]) - np.log(self.dailyOhlcv[name].shift(1))
-
-        self.reset()
-
-    def reset(self):
-        self.capital = capital
-        self.hoding = 0
-        self.cur_index = 0
-
-        return self._observation(self.cur_index)
-
-    def step(self, action):
-        self.cur_index += 1
-        done = self.cur_index >= len(self.dailyOhlcv)
-
-        if not done:
-            observation = self._observation(self.cur_index)
-
-            cur_price, next_price = self.dailyOhlcv.loc[self.cur_index-1:self.cur_index,
-                                                        ["open"]].values.ravel().tolist()
-            if action == 1 and self.capital > transFee:
-                self.hoding += (self.capital - transFee) / cur_price
-                self.capital = 0
-                reward = self._reward(cur_price, next_price)
-            elif action == -1 and self.hoding * cur_price > transFee:
-                self.capital += self.hoding * cur_price - transFee
-                self.hoding = 0
-                reward = self._reward(cur_price, next_price)
-            else:
-                reward = 0
-        else:
-            observation = self.reset()
-            reward = 0
-
-        info = {'capital': self.capital, 'holding': self.hoding}
-        return observation, reward, done, info
-
-    def _reward(self, cur_price, next_price):
-        reward = self.hoding * (next_price - cur_price) - transFee
-        return reward
-
-    def _observation(self, cur_index):
-        if self.log_diff:
-            observation = self.logDailyOhlcv.loc[cur_index,
-                                                 feature_list].values
-        else:
-            observation = self.dailyOhlcv.loc[cur_index,
-                                              feature_list].values
-        return observation.astype(np.float32)
-
+            print(loss_info)
 
 def myStrategy(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
     windowsSize = 180
