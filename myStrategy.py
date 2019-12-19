@@ -10,18 +10,18 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.distributions import Categorical
 
-feature_list = ["open", "high", "low", "close"]
+feature_list = ["open", "high", "low", "close", "volume"]
 transFee = 100
-capital = 500000
+capital = 10000
 
-hidden_size = 32
+hidden_size = 64
 learning_rate = 1e-4
 gamma = 0.98
 lmbda = 0.95
 clip = 0.1
 ent = 1e-3
 epoch = 2
-steps = 128
+steps = 180
 neps = 100000
 
 class TradingEnv:
@@ -168,7 +168,7 @@ class PPO(nn.Module):
                 advantage = torch.tensor(
                     advantage_lst, dtype=torch.float32, device=self.device)
 
-                returns = v_s.flatten() + advantage
+                returns = v_s.view(-1) + advantage
 
             # loss
             dist = Categorical(pi.squeeze(1))
@@ -180,12 +180,12 @@ class PPO(nn.Module):
             surr2 = torch.clamp(ratio, 1-clip, 1+clip) * advantage
             
             pi_loss = -torch.min(surr1, surr2).mean()
-            v_loss = F.smooth_l1_loss(v_s.flatten(), returns).mean()
+            v_loss = F.smooth_l1_loss(v_s.view(-1), returns).mean()
             ent_loss = ent * -dist.entropy().mean()
             loss = pi_loss + v_loss + ent_loss
             
             self.optimizer.zero_grad()
-            loss.backward(retain_graph=True)
+            loss.backward()
             self.optimizer.step()
             
             return pi_loss.item(), v_loss.item(), ent_loss.item()
