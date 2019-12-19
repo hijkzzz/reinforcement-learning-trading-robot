@@ -12,7 +12,7 @@ from torch.distributions import Categorical
 
 feature_list = ["open", "high", "low", "close", "volume"]
 transFee = 100
-capital = 10000
+capital = 500000
 
 hidden_size = 64
 learning_rate = 1e-4
@@ -22,19 +22,12 @@ clip = 0.1
 ent = 1e-3
 epoch = 2
 steps = 180
-neps = 100000
+neps = 10000
+
 
 class TradingEnv:
-    def __init__(self, dailyOhlcvFile, log_diff=False):
+    def __init__(self, dailyOhlcvFile):
         self.dailyOhlcv = pd.read_csv(dailyOhlcvFile)
-
-        self.log_diff = log_diff
-        if log_diff:
-            self.logDailyOhlcv = self.dailyOhlcv.copy(deep=True)
-            for name in feature_list:
-                self.logDailyOhlcv[name] = np.log(
-                    self.dailyOhlcv[name]) - np.log(self.dailyOhlcv[name].shift(1))
-
         self.reset()
 
     def reset(self):
@@ -51,8 +44,8 @@ class TradingEnv:
         if not done:
             observation = self._observation(self.cur_index)
 
-            cur_price, next_price = self.dailyOhlcv.loc[self.cur_index-1:self.cur_index,
-                                                        ["open"]].values.ravel().tolist()
+            cur_price, next_price = self.dailyOhlcv.loc[self.cur_index-1:self.cur_index,["open"]] \
+                                        .values.astype(np.float32).ravel().tolist()
             if action == 1 and self.capital > transFee:
                 self.hoding += (self.capital - transFee) / cur_price
                 self.capital = 0
@@ -75,12 +68,8 @@ class TradingEnv:
         return reward
 
     def _observation(self, cur_index):
-        if self.log_diff:
-            observation = self.logDailyOhlcv.loc[cur_index,
-                                                 feature_list].values
-        else:
-            observation = self.dailyOhlcv.loc[cur_index,
-                                              feature_list].values
+        observation = self.dailyOhlcv.loc[cur_index,
+                                          feature_list].values
         return observation.astype(np.float32)
 
 
@@ -92,7 +81,7 @@ class PPO(nn.Module):
         self.fc1 = nn.Linear(len(feature_list), hidden_size)
         self.lstm = nn.LSTM(hidden_size, hidden_size)
         self.fc2 = nn.Linear(hidden_size, hidden_size)
-        
+
         self.fc_pi = nn.Linear(hidden_size, 3)
         self.fc_v = nn.Linear(hidden_size, 1)
 
@@ -108,8 +97,8 @@ class PPO(nn.Module):
         x = F.relu(self.fc1(x))
         x = x.view(-1, 1, hidden_size)
         x, lstm_hidden = self.lstm(x, hidden)
-        x =  F.relu(self.fc2(x))
-        
+        x = F.relu(self.fc2(x))
+
         pi = self.fc_pi(x)
         pi = F.softmax(pi, dim=2)
         v = self.fc_v(x)
@@ -159,7 +148,7 @@ class PPO(nn.Module):
                 _, v_s_next, _ = self.forward(s_next, h_out)
                 td_target = r + gamma * v_s_next.squeeze(1) * done_mask
                 delta = td_target - v_s.squeeze(1)
-                
+
                 advantage_lst = []
                 advantage = 0.0
                 for t in range(len(delta) - 1, -1, -1):
@@ -176,40 +165,40 @@ class PPO(nn.Module):
             log_pi_a = dist.log_prob(a.squeeze(1))
             # a/b == exp(log(a)-log(b))
             ratio = torch.exp(log_pi_a - torch.log(prob_a.squeeze(1)))
-            
+
             surr1 = ratio * advantage
             surr2 = torch.clamp(ratio, 1-clip, 1+clip) * advantage
-            
+
             pi_loss = -torch.min(surr1, surr2).mean()
             v_loss = F.smooth_l1_loss(v_s.flatten(), returns).mean()
             ent_loss = ent * -dist.entropy().mean()
             loss = pi_loss + v_loss + ent_loss
-            
+
             self.optimizer.zero_grad()
             loss.backward(retain_graph=True)
             self.optimizer.step()
-            
+
             return pi_loss.item(), v_loss.item(), ent_loss.item()
 
     def train(self):
         for n_epi in range(neps):
             score = 0
-            
+
             h_out = (torch.zeros([1, 1, hidden_size], dtype=torch.float32, device=self.device),
                      torch.zeros([1, 1, hidden_size],  dtype=torch.float32, device=self.device))
             s = self.env.reset()
             done = False
-            
+
             while not done:
                 for t in range(steps):
                     h_in = h_out
                     prob, v, h_out = self.forward(torch.from_numpy(s).to(
                         dtype=torch.float32, device=self.device), h_in)
                     prob = prob.view(-1)
-                    
+
                     m = Categorical(prob)
-                    a = m.sample().item() 
-                    s_next, r, done, info = env.step(a - 1) # -1, 0, 1
+                    a = m.sample().item()
+                    s_next, r, done, info = env.step(a - 1)  # -1, 0, 1
 
                     self.put_data(
                         (s, a, r, s_next, prob[a].item(), h_in, h_out, done))
@@ -226,6 +215,7 @@ class PPO(nn.Module):
                 n_epi, score))
             print(loss_info)
 
+
 def myStrategy(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
     windowsSize = 180
     pastData = dailyOhlcvFile.loc[-windowsSize:, feature_list].values
@@ -235,6 +225,17 @@ def myStrategy(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
 
 if __name__ == "__main__":
     dailyOhlcvFile = sys.argv[1]
-    env = TradingEnv(dailyOhlcvFile, log_diff=False)
+    env = TradingEnv(dailyOhlcvFile)
     agent = PPO(env)
     agent.train()
+
+    # s = env.reset()
+    # print(s)
+
+    # d = False
+    # while not d:
+    #     a = random.choice([-1, 0, 1])
+    #     s, r, d, i = env.step(a)
+
+    #     print(s)
+    #     print(a, r, i)
