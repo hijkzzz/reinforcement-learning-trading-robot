@@ -71,7 +71,7 @@ class PPO(nn.Module):
 
         s, a, r, s_next, done_mask, prob_a = \
             torch.tensor(s_lst, dtype=torch.float32, device=self.device), \
-            torch.tensor(a_lst, dtype=torch.float32, device=self.device), \
+            torch.tensor(a_lst, dtype=torch.int32, device=self.device), \
             torch.tensor(r_lst, dtype=torch.float32, device=self.device), \
             torch.tensor(s_next_lst, dtype=torch.float32, device=self.device), \
             torch.tensor(done_lst, dtype=torch.float32, device=self.device), \
