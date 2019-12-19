@@ -169,7 +169,7 @@ class PPO(nn.Module):
                 advantage = torch.tensor(
                     advantage_lst, dtype=torch.float32, device=self.device)
 
-                returns = v_s.view(-1) + advantage
+                returns = v_s.flatten() + advantage
 
             # loss
             dist = Categorical(pi.squeeze(1))
@@ -181,7 +181,7 @@ class PPO(nn.Module):
             surr2 = torch.clamp(ratio, 1-clip, 1+clip) * advantage
             
             pi_loss = -torch.min(surr1, surr2).mean()
-            v_loss = F.smooth_l1_loss(v_s.view(-1), returns).mean()
+            v_loss = F.smooth_l1_loss(v_s.flatten(), returns).mean()
             ent_loss = ent * -dist.entropy().mean()
             loss = pi_loss + v_loss + ent_loss
             
