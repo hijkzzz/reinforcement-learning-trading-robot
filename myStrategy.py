@@ -18,6 +18,7 @@ clip = 0.1
 ent = 1e-3
 epoch = 2
 steps = 128
+neps = 10000
 
 
 class PPO(nn.Module):
@@ -36,7 +37,7 @@ class PPO(nn.Module):
         self.device = torch.device(
             'cuda') if torch.cuda.is_available() else torch.device('cpu')
         self.to(self.device)
-        
+
         self.env = env
 
     def forward(self, x, hidden):
@@ -77,84 +78,83 @@ class PPO(nn.Module):
             torch.tensor(done_lst, dtype=torch.float32, device=self.device), \
             torch.tensor(prob_a_lst, dtype=torch.float32, device=self.device)
         self.data = []
-        
+
         return s, a, r, s_next, done_mask, prob_a, h_in_lst[0], h_out_lst[0]
 
     def update_net(self):
         s, a, r, s_next, done_mask, prob_a, (h_in1,
-                                              h_in2), (h_out1, h_out2) = self.make_batch()
+                                             h_in2), (h_out1, h_out2) = self.make_batch()
         h_in = (h_in1.detach(), h_in2.detach())
         h_out = (h_out1.detach(), h_out2.detach())
 
         for i in range(epoch):
-            # advantage            
-            pi, v_s, _  = self.forward(s, h_in)
+            # advantage
+            pi, v_s, _ = self.forward(s, h_in)
 
             with torch.no_grad():
                 _, v_s_next, _ = self.forward(s_next, h_out)
                 td_target = r + gamma * v_s_next.squeeze(1) * done_mask
                 delta = td_target - v_s.squeeze(1)
-                
+
                 advantage_lst = []
                 advantage = 0.0
-                for d in delta[::-1]:
-                    advantage = gamma * lmbda * advantage + d
+                for t in range(len(delta) - 1, -1, -1):
+                    advantage = gamma * lmbda * advantage + delta[t]
                     advantage_lst.append(advantage)
                 advantage_lst.reverse()
                 advantage = torch.tensor(
                     advantage_lst, dtype=torch.float32, device=self.device)
-                
-                returns = v_s + advantages
+
+                returns = v_s.flatten() + advantage
 
             # loss
             dist = Categorical(pi.squeeze(1))
-            log_pi_a = dist.log_prob(a)
+            log_pi_a = dist.log_prob(a.squeeze(1))
             # a/b == exp(log(a)-log(b))
-            ratio = torch.exp(log_pi_a - torch.log(prob_a))
-
+            ratio = torch.exp(log_pi_a - torch.log(prob_a.squeeze(1)))
+            
             surr1 = ratio * advantage
             surr2 = torch.clamp(ratio, 1-clip, 1+clip) * advantage
-            loss = -torch.min(surr1, surr2) + F.smooth_l1_loss(v_s, returns) + \
-                ent * -torch.mean(dist.entropy())
+            
+            loss = -torch.min(surr1, surr2) + F.smooth_l1_loss(v_s.flatten(), returns) + ent * -dist.entropy()
 
             self.optimizer.zero_grad()
             loss.mean().backward(retain_graph=True)
             self.optimizer.step()
-    
+
     def train(self):
-        env = gym.make('CartPole-v1')
-        model = PPO()
-        score = 0.0
-        print_interval = 20
-        
-        for n_epi in range(10000):
-            h_out = (torch.zeros([1, 1, hidden_size], dtype=torch.float32, device=self.device), \
-                      torch.zeros([1, 1, hidden_size],  dtype=torch.float32, device=self.device))
-            s = env.reset()
+        for n_epi in range(neps):
+            score = 0
+            
+            h_out = (torch.zeros([1, 1, hidden_size], dtype=torch.float32, device=self.device),
+                     torch.zeros([1, 1, hidden_size],  dtype=torch.float32, device=self.device))
+            s = self.env.reset()
             done = False
             
             while not done:
                 for t in range(steps):
                     h_in = h_out
-                    prob, h_out = model.pi(torch.from_numpy(s).float(), h_in)
+                    prob, v, h_out = self.forward(torch.from_numpy(s).to(
+                        dtype=torch.float32, device=self.device), h_in)
                     prob = prob.view(-1)
+                    
                     m = Categorical(prob)
-                    a = m.sample().item()
-                    s_next, r, done, info = env.step(a)
+                    a = m.sample().item() 
+                    s_next, r, done, info = env.step(a - 1) # -1, 0, 1
 
-                    model.put_data((s, a, r, s_next, prob[a].item(), h_in, h_out, done))
+                    self.put_data(
+                        (s, a, r, s_next, prob[a].item(), h_in, h_out, done))
                     s = s_next
 
                     score += r
-                    
+
                     if done:
                         break
-                        
-                model.train_net()
 
-            if n_epi%print_interval==0 and n_epi!=0:
-                print("# of episode :{}, avg score : {:.1f}".format(n_epi, score/print_interval))
-                score = 0.0
+                self.update_net()
+
+            print("# of episode :{}, score : {:.1f}".format(
+                n_epi, score))
 
 
 feature_list = ["open", "high", "low", "close", "volume"]
@@ -219,7 +219,7 @@ class TradingEnv:
         else:
             observation = self.dailyOhlcv.loc[cur_index,
                                               feature_list].values
-        return observation
+        return observation.astype(np.float32)
 
 
 def myStrategy(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
@@ -232,15 +232,5 @@ def myStrategy(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
 if __name__ == "__main__":
     dailyOhlcvFile = sys.argv[1]
     env = TradingEnv(dailyOhlcvFile, log_diff=False)
-
-    done = False
-    state = env.reset()
-    print(state)
-
-    while not done:
-
-        action = random.choice([-1, 0, 1])
-        state, reward, done, info = env.step(action)
-
-        print(action, reward, info)
-        print(state)
+    agent = PPO(env)
+    agent.train()
