@@ -12,14 +12,16 @@ from torch.distributions import Categorical
 
 hidden_size = 32
 learning_rate = 1e-4
-gamma = 0.98
+gamma = 0.99
 lmbda = 0.95
-eps_clip = 0.1
-K_epoch = 2
-T_horizon = 20
+clip = 0.1
+ent = 1e-3
+epoch = 2
+steps = 128
+
 
 class PPO(nn.Module):
-    def __init__(self):
+    def __init__(self, env):
         super(PPO, self).__init__()
         self.data = []
 
@@ -28,15 +30,21 @@ class PPO(nn.Module):
         self.fc2 = nn.Linear(hidden_size, hidden_size)
         self.fc_pi = nn.Linear(hidden_size, 3)
         self.fc_v = nn.Linear(hidden_size, 1)
-        
+
         self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
+
+        self.device = torch.device(
+            'cuda') if torch.cuda.is_available() else torch.device('cpu')
+        self.to(self.device)
+        
+        self.env = env
 
     def forward(self, x, hidden):
         x = F.relu(self.fc1(x))
         x = x.view(-1, 1, hidden_size)
         x, lstm_hidden = self.lstm(x, hidden)
         x = self.fc2(x)
-        
+
         v = self.fc_v(x)
         pi = self.fc_pi(x)
         pi = F.softmax(pi, dim=2)
@@ -46,61 +54,107 @@ class PPO(nn.Module):
         self.data.append(transition)
 
     def make_batch(self):
-        s_lst, a_lst, r_lst, s_prime_lst, prob_a_lst, h_in_lst, h_out_lst, done_lst = [
+        s_lst, a_lst, r_lst, s_next_lst, prob_a_lst, h_in_lst, h_out_lst, done_lst = [
         ], [], [], [], [], [], [], []
         for transition in self.data:
-            s, a, r, s_prime, prob_a, h_in, h_out, done = transition
+            s, a, r, s_next, prob_a, h_in, h_out, done = transition
 
             s_lst.append(s)
             a_lst.append([a])
             r_lst.append([r])
-            s_prime_lst.append(s_prime)
+            s_next_lst.append(s_next)
             prob_a_lst.append([prob_a])
             h_in_lst.append(h_in)
             h_out_lst.append(h_out)
             done_mask = 0 if done else 1
             done_lst.append([done_mask])
 
-        s, a, r, s_prime, done_mask, prob_a = torch.tensor(s_lst, dtype=torch.float), torch.tensor(a_lst), \
-            torch.tensor(r_lst), torch.tensor(s_prime_lst, dtype=torch.float), \
-            torch.tensor(done_lst, dtype=torch.float), torch.tensor(prob_a_lst)
+        s, a, r, s_next, done_mask, prob_a = \
+            torch.tensor(s_lst, dtype=torch.float32, device=self.device), \
+            torch.tensor(a_lst, dtype=torch.float32, device=self.device), \
+            torch.tensor(r_lst, dtype=torch.float32, device=self.device), \
+            torch.tensor(s_next_lst, dtype=torch.float32, device=self.device), \
+            torch.tensor(done_lst, dtype=torch.float32, device=self.device), \
+            torch.tensor(prob_a_lst, dtype=torch.float32, device=self.device)
         self.data = []
-        return s, a, r, s_prime, done_mask, prob_a, h_in_lst[0], h_out_lst[0]
+        
+        return s, a, r, s_next, done_mask, prob_a, h_in_lst[0], h_out_lst[0]
 
-    def train_net(self):
-        s, a, r, s_prime, done_mask, prob_a, (h1_in,
-                                              h2_in), (h1_out, h2_out) = self.make_batch()
-        first_hidden = (h1_in.detach(), h2_in.detach())
-        second_hidden = (h1_out.detach(), h2_out.detach())
+    def update_net(self):
+        s, a, r, s_next, done_mask, prob_a, (h_in1,
+                                              h_in2), (h_out1, h_out2) = self.make_batch()
+        h_in = (h_in1.detach(), h_in2.detach())
+        h_out = (h_out1.detach(), h_out2.detach())
 
-        for i in range(K_epoch):
-            v_prime = self.v(s_prime, second_hidden).squeeze(1)
-            td_target = r + gamma * v_prime * done_mask
-            v_s = self.v(s, first_hidden).squeeze(1)
-            delta = td_target - v_s
-            delta = delta.detach().numpy()
+        for i in range(epoch):
+            # advantage            
+            pi, v_s, _  = self.forward(s, h_in)
 
-            advantage_lst = []
-            advantage = 0.0
-            for item in delta[::-1]:
-                advantage = gamma * lmbda * advantage + item[0]
-                advantage_lst.append([advantage])
-            advantage_lst.reverse()
-            advantage = torch.tensor(advantage_lst, dtype=torch.float)
+            with torch.no_grad():
+                _, v_s_next, _ = self.forward(s_next, h_out)
+                td_target = r + gamma * v_s_next.squeeze(1) * done_mask
+                delta = td_target - v_s.squeeze(1)
+                
+                advantage_lst = []
+                advantage = 0.0
+                for d in delta[::-1]:
+                    advantage = gamma * lmbda * advantage + d
+                    advantage_lst.append(advantage)
+                advantage_lst.reverse()
+                advantage = torch.tensor(
+                    advantage_lst, dtype=torch.float32, device=self.device)
+                
+                returns = v_s + advantages
 
-            pi, _ = self.pi(s, first_hidden)
-            pi_a = pi.squeeze(1).gather(1, a)
-            # a/b == log(exp(a)-exp(b))
-            ratio = torch.exp(torch.log(pi_a) - torch.log(prob_a))
+            # loss
+            dist = Categorical(pi.squeeze(1))
+            log_pi_a = dist.log_prob(a)
+            # a/b == exp(log(a)-log(b))
+            ratio = torch.exp(log_pi_a - torch.log(prob_a))
 
             surr1 = ratio * advantage
-            surr2 = torch.clamp(ratio, 1-eps_clip, 1+eps_clip) * advantage
-            loss = -torch.min(surr1, surr2) + \
-                F.smooth_l1_loss(v_s, td_target.detach())
+            surr2 = torch.clamp(ratio, 1-clip, 1+clip) * advantage
+            loss = -torch.min(surr1, surr2) + F.smooth_l1_loss(v_s, returns) + \
+                ent * -torch.mean(dist.entropy())
 
             self.optimizer.zero_grad()
             loss.mean().backward(retain_graph=True)
             self.optimizer.step()
+    
+    def train(self):
+        env = gym.make('CartPole-v1')
+        model = PPO()
+        score = 0.0
+        print_interval = 20
+        
+        for n_epi in range(10000):
+            h_out = (torch.zeros([1, 1, hidden_size], dtype=torch.float32, device=self.device), \
+                      torch.zeros([1, 1, hidden_size],  dtype=torch.float32, device=self.device))
+            s = env.reset()
+            done = False
+            
+            while not done:
+                for t in range(steps):
+                    h_in = h_out
+                    prob, h_out = model.pi(torch.from_numpy(s).float(), h_in)
+                    prob = prob.view(-1)
+                    m = Categorical(prob)
+                    a = m.sample().item()
+                    s_next, r, done, info = env.step(a)
+
+                    model.put_data((s, a, r, s_next, prob[a].item(), h_in, h_out, done))
+                    s = s_next
+
+                    score += r
+                    
+                    if done:
+                        break
+                        
+                model.train_net()
+
+            if n_epi%print_interval==0 and n_epi!=0:
+                print("# of episode :{}, avg score : {:.1f}".format(n_epi, score/print_interval))
+                score = 0.0
 
 
 feature_list = ["open", "high", "low", "close", "volume"]
@@ -155,7 +209,7 @@ class TradingEnv:
         return observation, reward, done, info
 
     def _reward(self, cur_price, next_price):
-        reward =  self.hoding * (next_price - cur_price) - transFee
+        reward = self.hoding * (next_price - cur_price) - transFee
         return reward
 
     def _observation(self, cur_index):
