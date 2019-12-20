@@ -26,7 +26,7 @@ clip = 0.1
 ent = 1e-3
 epoch = 2
 nsteps = 200
-neps = 10000
+neps = 100000
 
 
 class TradingEnv:
@@ -291,18 +291,19 @@ def myStrategy_rsi(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
 
 
 def myStrategy(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
+    # load param
     param_dict = {}
+    model = PPO(None)
+    model.load_state_dict(param_dict)
 
     # log diff
     windowsSize = 200
-    pastData = dailyOhlcvFile.loc[-windowsSize-1:, feature_list]
+    pastData = dailyOhlcvFile.tail(windowsSize + 1)[feature_list]
     pastData = (np.log(pastData) - np.log(pastData.shift(1))
                 ).values[1:].astype(np.float32)
-
-    model = PPO(None)
-    model.load_state_dict(param_dict)
-    pi, _, _ = model(torch.from_numpy(
-        pastData).to(dtype=torch.float32, device=model.device).unsqueeze(1), None)
-
+    pastData = torch.from_numpy(pastData).to(dtype=torch.float32, device=model.device).unsqueeze(1)
+    
+    # infer
+    pi, _, _ = model(pastData, None)
     action = torch.argmax(pi[-1][0]).item() - 1
     return action
