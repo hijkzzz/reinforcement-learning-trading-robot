@@ -67,7 +67,7 @@ class TradingEnv:
         return next_obs, reward, done, info
 
     def _reward(self, pre_return_rate, return_rate):
-        return return_rate - pre_return_rate
+        return (return_rate - pre_return_rate) * 100
 
     def _observation(self, cur_index):
         cur_obs = self.dailyOhlcv.loc[cur_index,
