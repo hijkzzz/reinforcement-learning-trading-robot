@@ -1,11 +1,12 @@
 import sys
 import random
-import os
+from collections import OrderedDict
 
 import pandas as pd
 import numpy as np
 
 import torch
+from torch import tensor
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
@@ -219,6 +220,8 @@ class PPO(nn.Module):
             print(loss_info)
             print(info)
 
+            save_to_file(filename, str(self.state_dict()))
+
 
 def save_to_file(file_name, contents):
     fh = open(file_name, 'w')
@@ -226,13 +229,15 @@ def save_to_file(file_name, contents):
     fh.close()
 
 
+# for train
 if __name__ == "__main__":
+    torch.set_printoptions(precision=7, threshold=10000000)
+
     dailyOhlcvFile = sys.argv[1]
     env = TradingEnv(dailyOhlcvFile)
 
     agent = PPO(env)
     agent.train()
-    save_to_file(filename, str(agent.state_dict()))
 
     # for test
     # s = env.reset()
@@ -243,23 +248,6 @@ if __name__ == "__main__":
     #         s, r, d, i = env.step(a)
     #     print(i)
 
-
-def myStrategy(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
-    param_dict = {}
-
-    # log diff
-    windowsSize = 200
-    pastData = dailyOhlcvFile.loc[-windowsSize-1:, feature_list]
-    pastData = (np.log(pastData) - np.log(pastData.shift(1))
-                ).values[1:].astype(np.float32)
-
-    model = PPO(None)
-    model.load_state_dict(param_dict)
-    pi, _, _ = model(torch.from_numpy(
-        pastData, dtype=torch.float32, device=model.device).unsqueeze(1), None)
-
-    action = torch.argmax(pi[-1][0]).item() - 1
-    return action
 
 def cal_rsi(pastData):
     sma_u = 0
@@ -276,9 +264,9 @@ def cal_rsi(pastData):
     return rsi
 
 
-def myStrategy2(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
+def myStrategy_rsi(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
     pastData = dailyOhlcvFile["open"].values.astype(np.float32)
-    
+
     longWindowSize = 72
     shortWindowSize = 18
     windowSize = 4
@@ -300,3 +288,21 @@ def myStrategy2(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
         return -1
     else:
         return 0
+
+
+def myStrategy(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
+    param_dict = {}
+
+    # log diff
+    windowsSize = 200
+    pastData = dailyOhlcvFile.loc[-windowsSize-1:, feature_list]
+    pastData = (np.log(pastData) - np.log(pastData.shift(1))
+                ).values[1:].astype(np.float32)
+
+    model = PPO(None)
+    model.load_state_dict(param_dict)
+    pi, _, _ = model(torch.from_numpy(
+        pastData).to(dtype=torch.float32, device=model.device).unsqueeze(1), None)
+
+    action = torch.argmax(pi[-1][0]).item() - 1
+    return action
