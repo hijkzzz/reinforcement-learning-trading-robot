@@ -21,7 +21,7 @@ lmbda = 0.95
 clip = 0.1
 ent = 1e-3
 epoch = 2
-steps = 180
+nsteps = 180
 neps = 10000
 
 
@@ -32,45 +32,48 @@ class TradingEnv:
 
     def reset(self):
         self.capital = capital
-        self.hoding = 0
-        self.cur_index = 0
+        self.holding = 0
+        self.pre_return_rate = 0
+        # random start point
+        self.cur_index = random.randint(1, len(self.dailyOhlcv) - nsteps)
 
         return self._observation(self.cur_index)
 
     def step(self, action):
         self.cur_index += 1
-        done = self.cur_index >= len(self.dailyOhlcv)
+        done = (self.cur_index == len(self.dailyOhlcv) - 1)
 
         if not done:
-            observation = self._observation(self.cur_index)
-
-            cur_price, next_price = self.dailyOhlcv.loc[self.cur_index-1:self.cur_index,["open"]] \
-                                        .values.astype(np.float32).ravel().tolist()
-            if action == 1 and self.capital > transFee:
-                self.hoding += (self.capital - transFee) / cur_price
-                self.capital = 0
-                reward = self._reward(cur_price, next_price)
-            elif action == -1 and self.hoding * cur_price > transFee:
-                self.capital += self.hoding * cur_price - transFee
-                self.hoding = 0
-                reward = self._reward(cur_price, next_price)
-            else:
-                reward = 0
+            next_obs = self._observation(self.cur_index)
         else:
-            observation = self.reset()
-            reward = 0
+            next_obs = self.reset()
+            
+        cur_price = self.dailyOhlcv.loc[self.cur_index-1, ["open"]].values.astype(np.float32)[0]
+        if action == 1 and self.capital > transFee:
+            self.holding += (self.capital - transFee) / cur_price
+            self.capital = 0
+        elif action == -1 and self.holding * cur_price > transFee:
+            self.capital += self.holding * cur_price - transFee
+            self.holding = 0
+            
+        return_rate = (self.capital + self.holding * cur_price) / capital - 1
+        reward = self._reward(self.pre_return_rate, return_rate)
+        self.pre_return_rate = return_rate
 
-        info = {'capital': self.capital, 'holding': self.hoding}
-        return observation, reward, done, info
+        info = {'capital': self.capital,
+                'holding': self.holding, 'return_rate': return_rate}
+        return next_obs, reward, done, info
 
-    def _reward(self, cur_price, next_price):
-        reward = self.hoding * (next_price - cur_price) - transFee
-        return reward
+    def _reward(self, pre_return_rate, return_rate):
+        return return_rate - pre_return_rate
 
     def _observation(self, cur_index):
-        observation = self.dailyOhlcv.loc[cur_index,
-                                          feature_list].values
-        return observation.astype(np.float32)
+        cur_obs = self.dailyOhlcv.loc[cur_index,
+                                      feature_list].values.astype(np.float32)
+        pre_obs = self.dailyOhlcv.loc[cur_index-1,
+                                      feature_list].values.astype(np.float32)
+        # diff feature
+        return np.log(cur_obs) - np.log(pre_obs)
 
 
 class PPO(nn.Module):
@@ -182,15 +185,13 @@ class PPO(nn.Module):
 
     def train(self):
         for n_epi in range(neps):
-            score = 0
-
             h_out = (torch.zeros([1, 1, hidden_size], dtype=torch.float32, device=self.device),
                      torch.zeros([1, 1, hidden_size],  dtype=torch.float32, device=self.device))
             s = self.env.reset()
             done = False
 
             while not done:
-                for t in range(steps):
+                for t in range(nsteps):
                     h_in = h_out
                     prob, v, h_out = self.forward(torch.from_numpy(s).to(
                         dtype=torch.float32, device=self.device), h_in)
@@ -204,15 +205,13 @@ class PPO(nn.Module):
                         (s, a, r, s_next, prob[a].item(), h_in, h_out, done))
                     s = s_next
 
-                    score += r
-
                     if done:
                         break
 
                 loss_info = self.update_net()
 
-            print("# of episode :{}, score : {:.1f}".format(
-                n_epi, score))
+            print("# of episode :{}, return rate : {}".format(
+                n_epi, info['return_rate']))
             print(loss_info)
 
 
@@ -227,15 +226,15 @@ if __name__ == "__main__":
     dailyOhlcvFile = sys.argv[1]
     env = TradingEnv(dailyOhlcvFile)
     agent = PPO(env)
-    agent.train()
+    # agent.train()
 
-    # s = env.reset()
-    # print(s)
+    s = env.reset()
+    print(s)
 
-    # d = False
-    # while not d:
-    #     a = random.choice([-1, 0, 1])
-    #     s, r, d, i = env.step(a)
+    d = False
+    while not d:
+        a = random.choice([-1, 0, 1])
+        s, r, d, i = env.step(a)
 
-    #     print(s)
-    #     print(a, r, i)
+        print(s)
+        print(a, r, i)
