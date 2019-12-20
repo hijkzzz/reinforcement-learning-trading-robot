@@ -31,7 +31,7 @@ class TradingEnv:
         self.reset()
 
     def reset(self):
-        self.capital = capital
+        self.cur_capital = capital
         self.holding = 0
         self.pre_return_rate = 0
         # random start point
@@ -43,26 +43,27 @@ class TradingEnv:
         self.cur_index += 1
         done = (self.cur_index == len(self.dailyOhlcv) - 1)
 
+        cur_price = self.dailyOhlcv.loc[self.cur_index -
+                                        1, ["open"]].values.astype(np.float32)[0]
+        if action == 1 and self.cur_capital > transFee:
+            self.holding = (self.cur_capital - transFee) / cur_price
+            self.cur_capital = 0
+        elif action == -1 and self.holding * cur_price > transFee:
+            self.cur_capital = self.holding * cur_price - transFee
+            self.holding = 0
+
+        return_rate = (self.cur_capital + self.holding *
+                       cur_price) / capital - 1
+        reward = self._reward(self.pre_return_rate, return_rate)
+        self.pre_return_rate = return_rate
+
+        info = {'capital': self.cur_capital,
+                'holding': self.holding, 'return_rate': return_rate}
+
         if not done:
             next_obs = self._observation(self.cur_index)
         else:
             next_obs = self.reset()
-
-        cur_price = self.dailyOhlcv.loc[self.cur_index -
-                                        1, ["open"]].values.astype(np.float32)[0]
-        if action == 1 and self.capital > transFee:
-            self.holding += (self.capital - transFee) / cur_price
-            self.capital = 0
-        elif action == -1 and self.holding * cur_price > transFee:
-            self.capital += self.holding * cur_price - transFee
-            self.holding = 0
-
-        return_rate = (self.capital + self.holding * cur_price) / capital - 1
-        reward = self._reward(self.pre_return_rate, return_rate)
-        self.pre_return_rate = return_rate
-
-        info = {'capital': self.capital,
-                'holding': self.holding, 'return_rate': return_rate}
         return next_obs, reward, done, info
 
     def _reward(self, pre_return_rate, return_rate):
@@ -211,8 +212,9 @@ class PPO(nn.Module):
 
                 loss_info = self.update_net()
 
-            print("# {}: {}".format(n_epi, info))
+            print(n_epi)
             print(loss_info)
+            print(info)
 
 
 def myStrategy(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
@@ -229,12 +231,15 @@ if __name__ == "__main__":
     agent.train()
 
     # s = env.reset()
-    # print(s)
+    # # print(s)
 
-    # d = False
-    # while not d:
-    #     a = random.choice([-1, 0, 1])
-    #     s, r, d, i = env.step(a)
+    # while True:
+    #     d = False
+    #     while not d:
+    #         a = random.choice([-1, 0, 1])
+    #         s, r, d, i = env.step(a)
 
-    #     print(s)
-    #     print(a, r, i)
+    #         # print(s)
+    #         # print(a, r, i)
+
+    #     print(i)
