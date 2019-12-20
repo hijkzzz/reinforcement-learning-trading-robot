@@ -47,15 +47,16 @@ class TradingEnv:
             next_obs = self._observation(self.cur_index)
         else:
             next_obs = self.reset()
-            
-        cur_price = self.dailyOhlcv.loc[self.cur_index-1, ["open"]].values.astype(np.float32)[0]
+
+        cur_price = self.dailyOhlcv.loc[self.cur_index -
+                                        1, ["open"]].values.astype(np.float32)[0]
         if action == 1 and self.capital > transFee:
             self.holding += (self.capital - transFee) / cur_price
             self.capital = 0
         elif action == -1 and self.holding * cur_price > transFee:
             self.capital += self.holding * cur_price - transFee
             self.holding = 0
-            
+
         return_rate = (self.capital + self.holding * cur_price) / capital - 1
         reward = self._reward(self.pre_return_rate, return_rate)
         self.pre_return_rate = return_rate
@@ -181,7 +182,7 @@ class PPO(nn.Module):
             loss.backward(retain_graph=True)
             self.optimizer.step()
 
-            return pi_loss.item(), v_loss.item(), ent_loss.item()
+            return {"pi_loss": pi_loss.item(), "v_loss": v_loss.item(), "ent_loss": ent_loss.item()}
 
     def train(self):
         for n_epi in range(neps):
@@ -210,8 +211,7 @@ class PPO(nn.Module):
 
                 loss_info = self.update_net()
 
-            print("# of episode :{}, return rate : {}".format(
-                n_epi, info['return_rate']))
+            print("# {}: {}".format(n_epi, info))
             print(loss_info)
 
 
