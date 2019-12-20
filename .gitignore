@@ -3,4 +3,4 @@
 __pycache__
 *.csv
 *.docx
-!ohlcv_daily.csv
+*.txt

@@ -11,7 +11,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.distributions import Categorical
 
-filename='params.pkl'
+filename = 'params.txt'
 
 feature_list = ["open", "high", "low", "close", "volume"]
 transFee = 100
@@ -24,7 +24,7 @@ lmbda = 0.95
 clip = 0.1
 ent = 1e-3
 epoch = 2
-nsteps = 180
+nsteps = 200
 neps = 10000
 
 
@@ -219,36 +219,41 @@ class PPO(nn.Module):
             print(loss_info)
             print(info)
 
-
-def myStrategy(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
-    windowsSize = 180
-    pastData = dailyOhlcvFile.loc[-windowsSize:, feature_list].values
-
-    return 1
+def save_to_file(file_name, contents):
+    fh = open(file_name, 'w')
+    fh.write(contents)
+    fh.close()
 
 
 if __name__ == "__main__":
     dailyOhlcvFile = sys.argv[1]
     env = TradingEnv(dailyOhlcvFile)
-    
-    if os.path.exists(filename):
-        agent.load_state_dict(torch.load(filename))
-    
+
     agent = PPO(env)
     agent.train()
-    
-    torch.save(agent.state_dict(), filename)
+    save_to_file(filename, str(agent.state_dict()))
 
+    # for test
     # s = env.reset()
-    # # print(s)
-
     # while True:
     #     d = False
     #     while not d:
     #         a = random.choice([-1, 0, 1])
     #         s, r, d, i = env.step(a)
-
-    #         # print(s)
-    #         # print(a, r, i)
-
     #     print(i)
+
+
+def myStrategy(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
+    param_dict = {}
+    
+    # log diff
+    windowsSize = 200
+    pastData = dailyOhlcvFile.loc[-windowsSize-1:, feature_list]
+    pastData = (np.log(pastData) - np.log(pastData.shift(1))).values[1:].astype(np.float32)
+
+    model = PPO(None)
+    model.load_state_dict(param_dict)
+    pi, _, _ = model(torch.from_numpy(pastData, dtype=torch.float32, device=model.device), None)
+    
+    action = torch.argmax(pi[-1][0]).item() - 1
+    return action
