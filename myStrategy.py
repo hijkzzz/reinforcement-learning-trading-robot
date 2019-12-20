@@ -226,15 +226,15 @@ if __name__ == "__main__":
     dailyOhlcvFile = sys.argv[1]
     env = TradingEnv(dailyOhlcvFile)
     agent = PPO(env)
-    # agent.train()
+    agent.train()
 
-    s = env.reset()
-    print(s)
+    # s = env.reset()
+    # print(s)
 
-    d = False
-    while not d:
-        a = random.choice([-1, 0, 1])
-        s, r, d, i = env.step(a)
+    # d = False
+    # while not d:
+    #     a = random.choice([-1, 0, 1])
+    #     s, r, d, i = env.step(a)
 
-        print(s)
-        print(a, r, i)
+    #     print(s)
+    #     print(a, r, i)
