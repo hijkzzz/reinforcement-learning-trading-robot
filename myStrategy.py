@@ -38,7 +38,7 @@ class TradingEnv:
         self.holding = 0
         self.pre_return_rate = 0
         # random start point
-        self.cur_index = random.randint(1, len(self.dailyOhlcv) - nsteps)
+        self.cur_index = random.randint(1, nsteps)
 
         return self._observation(self.cur_index)
 
@@ -219,6 +219,7 @@ class PPO(nn.Module):
             print(loss_info)
             print(info)
 
+
 def save_to_file(file_name, contents):
     fh = open(file_name, 'w')
     fh.write(contents)
@@ -245,15 +246,57 @@ if __name__ == "__main__":
 
 def myStrategy(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
     param_dict = {}
-    
+
     # log diff
     windowsSize = 200
     pastData = dailyOhlcvFile.loc[-windowsSize-1:, feature_list]
-    pastData = (np.log(pastData) - np.log(pastData.shift(1))).values[1:].astype(np.float32)
+    pastData = (np.log(pastData) - np.log(pastData.shift(1))
+                ).values[1:].astype(np.float32)
 
     model = PPO(None)
     model.load_state_dict(param_dict)
-    pi, _, _ = model(torch.from_numpy(pastData, dtype=torch.float32, device=model.device), None)
-    
+    pi, _, _ = model(torch.from_numpy(
+        pastData, dtype=torch.float32, device=model.device).unsqueeze(1), None)
+
     action = torch.argmax(pi[-1][0]).item() - 1
     return action
+
+def cal_rsi(pastData):
+    sma_u = 0
+    sma_d = 0
+    dataLen = len(pastData)
+
+    for i in range(dataLen-1):
+        if pastData[i] <= pastData[i+1]:
+            sma_u += (pastData[i+1]-pastData[i])
+        else:
+            sma_d += (pastData[i]-pastData[i+1])
+
+    rsi = sma_u / (sma_d + sma_u)
+    return rsi
+
+
+def myStrategy2(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
+    pastData = dailyOhlcvFile["open"].values.astype(np.float32)
+    
+    longWindowSize = 72
+    shortWindowSize = 18
+    windowSize = 4
+    buyRsi = 0.3
+    sellRsi = 0.1
+
+    if len(pastData) < max(longWindowSize + 1, windowSize):
+        return 0
+
+    rsi = cal_rsi(pastData[-windowSize:])
+    longRsiPre, longRsi = cal_rsi(
+        pastData[-longWindowSize - 1:-1]), cal_rsi(pastData[-longWindowSize:])
+    shortRsiPre, shortRsi = cal_rsi(
+        pastData[-shortWindowSize - 1:-1]), cal_rsi(pastData[-shortWindowSize:])
+
+    if rsi > buyRsi and shortRsi > longRsi and shortRsiPre < longRsiPre:
+        return 1
+    elif rsi < sellRsi and shortRsi < longRsi and shortRsiPre > longRsiPre:
+        return -1
+    else:
+        return 0
