@@ -1,5 +1,6 @@
 import sys
 import random
+import os
 
 import pandas as pd
 import numpy as np
@@ -9,6 +10,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.distributions import Categorical
+
+filename='params.pkl'
 
 feature_list = ["open", "high", "low", "close", "volume"]
 transFee = 100
@@ -227,8 +230,14 @@ def myStrategy(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
 if __name__ == "__main__":
     dailyOhlcvFile = sys.argv[1]
     env = TradingEnv(dailyOhlcvFile)
+    
+    if os.path.exists(filename):
+        agent.load_state_dict(torch.load(filename))
+    
     agent = PPO(env)
     agent.train()
+    
+    torch.save(agent.state_dict(), filename)
 
     # s = env.reset()
     # # print(s)
