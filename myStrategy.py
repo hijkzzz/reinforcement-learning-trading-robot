@@ -12,7 +12,8 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.distributions import Categorical
 
-filename = 'params.txt'
+from params import param_dict
+filename = 'params.py'
 
 feature_list = ["open", "high", "low", "close", "volume"]
 transFee = 100
@@ -292,7 +293,6 @@ def myStrategy_rsi(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
 
 def myStrategy(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
     # load param
-    param_dict = {}
     model = PPO(None)
     model.load_state_dict(param_dict)
 
@@ -301,8 +301,9 @@ def myStrategy(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
     pastData = dailyOhlcvFile.tail(windowsSize + 1)[feature_list]
     pastData = (np.log(pastData) - np.log(pastData.shift(1))
                 ).values[1:].astype(np.float32)
-    pastData = torch.from_numpy(pastData).to(dtype=torch.float32, device=model.device).unsqueeze(1)
-    
+    pastData = torch.from_numpy(pastData).to(
+        dtype=torch.float32, device=model.device).unsqueeze(1)
+
     # infer
     pi, _, _ = model(pastData, None)
     action = torch.argmax(pi[-1][0]).item() - 1
