@@ -97,8 +97,7 @@ class PPO(nn.Module):
 
         self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
 
-        self.device = torch.device(
-            'cuda') if torch.cuda.is_available() else torch.device('cpu')
+        self.device = torch.device('cpu')
         self.to(self.device)
 
         self.env = env
