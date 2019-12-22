@@ -16,7 +16,7 @@ feature_list = ["open", "high", "low", "close", "volume"]
 transFee = 100
 capital = 500000
 
-hidden_size = 24
+hidden_size = 64
 learning_rate = 1e-4
 gamma = 0.99
 lmbda = 0.95
@@ -30,6 +30,11 @@ neps = 100000
 class TradingEnv:
     def __init__(self, dailyOhlcvFile):
         self.dailyOhlcv = pd.read_csv(dailyOhlcvFile)
+
+        self.diffOhlcv = (np.log(self.dailyOhlcv[feature_list])
+                          - np.log(self.dailyOhlcv[feature_list].shift(1)))\
+            .values.astype(np.float32)
+
         self.reset()
 
     def reset(self, test=False):
@@ -46,11 +51,10 @@ class TradingEnv:
         return self._observation(self.cur_index)
 
     def step(self, action):
-        self.cur_index += 1
-        done = (self.cur_index == len(self.dailyOhlcv) - 1)
+        done = (self.cur_index == len(self.dailyOhlcv) - 2)
 
-        cur_price = self.dailyOhlcv.loc[self.cur_index -
-                                        1, ["open"]].values.astype(np.float32)[0]
+        cur_price = self.dailyOhlcv.loc[self.cur_index, [
+            "open"]].values.astype(np.float32)[0]
         if action == 1 and self.cur_capital > transFee:
             self.holding = (self.cur_capital - transFee) / cur_price
             self.cur_capital = 0
@@ -70,18 +74,15 @@ class TradingEnv:
             next_obs = self._observation(self.cur_index)
         else:
             next_obs = self.reset()
+
+        self.cur_index += 1
         return next_obs, reward, done, info
 
     def _reward(self, pre_return_rate, return_rate):
         return (return_rate - pre_return_rate) * 100
 
     def _observation(self, today):
-        cur_obs = self.dailyOhlcv.loc[today-1,
-                                      feature_list].values.astype(np.float32)
-        pre_obs = self.dailyOhlcv.loc[today-2,
-                                      feature_list].values.astype(np.float32)
-        # diff feature
-        return np.log(cur_obs) - np.log(pre_obs)
+        return np.hstack((self.diffOhlcv[today-1], [self.diffOhlcv[today][0]]))
 
 
 class PPO(nn.Module):
@@ -89,7 +90,7 @@ class PPO(nn.Module):
         super(PPO, self).__init__()
         self.data = []
 
-        self.fc1 = nn.Linear(len(feature_list), hidden_size)
+        self.fc1 = nn.Linear(len(feature_list) + 1, hidden_size)
         self.lstm = nn.LSTM(hidden_size, hidden_size)
         self.fc2 = nn.Linear(hidden_size, hidden_size)
 
@@ -276,9 +277,14 @@ def myStrategy(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
 
     # log diff
     windowsSize = 200
-    pastData = dailyOhlcvFile[feature_list].tail(
+    dailyOhlcv = dailyOhlcvFile[feature_list].tail(
         windowsSize+1).values.astype(np.float32)
-    pastData = np.log(pastData[1:]) - np.log(pastData[:-1])
+
+    diff1 = np.log(dailyOhlcv[1:]) - np.log(dailyOhlcv[:-1])
+    diff2 = np.log(
+        np.hstack((dailyOhlcv[2:, 0], [openPrice]))) - np.log(dailyOhlcv[1:, 0])
+
+    pastData = np.hstack((diff1, diff2[:, np.newaxis]))
     pastData = torch.from_numpy(pastData).to(
         dtype=torch.float32, device=model.device).unsqueeze(1)
 
