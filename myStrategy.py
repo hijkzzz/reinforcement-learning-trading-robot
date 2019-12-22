@@ -1,12 +1,10 @@
 import sys
 import random
-from collections import OrderedDict
 
 import pandas as pd
 import numpy as np
 
 import torch
-from torch import tensor
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
@@ -249,6 +247,7 @@ class PPO(nn.Module):
 
 def save_to_file(file_name, contents):
     fh = open(file_name, 'w')
+    fh.write("from collections import OrderedDict\nfrom torch import tensor\n")
     fh.write(contents)
     fh.close()
 
