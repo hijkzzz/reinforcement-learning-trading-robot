@@ -15,7 +15,7 @@ from torch.distributions import Categorical
 from params import param_dict
 filename = 'params.py'
 
-feature_list = ["open", "high", "low", "close", "volume"]
+feature_list = ["open"]
 transFee = 100
 capital = 500000
 
@@ -35,12 +35,16 @@ class TradingEnv:
         self.dailyOhlcv = pd.read_csv(dailyOhlcvFile)
         self.reset()
 
-    def reset(self):
+    def reset(self, test=False):
         self.cur_capital = capital
         self.holding = 0
         self.pre_return_rate = 0
-        # random start point
-        self.cur_index = random.randint(1, nsteps)
+        
+        if not test:
+            # random start point
+            self.cur_index = random.randint(2, nsteps)
+        else:
+            self.cur_index = 2
 
         return self._observation(self.cur_index)
 
@@ -74,22 +78,20 @@ class TradingEnv:
     def _reward(self, pre_return_rate, return_rate):
         return (return_rate - pre_return_rate) * 100
 
-    def _observation(self, cur_index):
-        cur_obs = self.dailyOhlcv.loc[cur_index,
+    def _observation(self, today):
+        cur_obs = self.dailyOhlcv.loc[today-1,
                                       feature_list].values.astype(np.float32)
-        pre_obs = self.dailyOhlcv.loc[cur_index-1,
+        pre_obs = self.dailyOhlcv.loc[today-2,
                                       feature_list].values.astype(np.float32)
         # diff feature
         return np.log(cur_obs) - np.log(pre_obs)
 
-
 class PPO(nn.Module):
-    def __init__(self, env):
+    def __init__(self, env=None):
         super(PPO, self).__init__()
         self.data = []
 
-        self.fc1 = nn.Linear(len(feature_list), hidden_size)
-        self.lstm = nn.LSTM(hidden_size, hidden_size)
+        self.lstm = nn.LSTM(len(feature_list), hidden_size)
         self.fc2 = nn.Linear(hidden_size, hidden_size)
 
         self.fc_pi = nn.Linear(hidden_size, 3)
@@ -97,14 +99,13 @@ class PPO(nn.Module):
 
         self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
 
-        self.device = torch.device('cpu')
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.to(self.device)
 
         self.env = env
 
     def forward(self, x, hidden):
-        x = F.relu(self.fc1(x))
-        x = x.view(-1, 1, hidden_size)
+        x = x.view(-1, 1, len(feature_list))
         x, lstm_hidden = self.lstm(x, hidden)
         x = F.relu(self.fc2(x))
 
@@ -221,6 +222,27 @@ class PPO(nn.Module):
             print(info)
 
             save_to_file(filename, str(self.state_dict()))
+            
+    def test(self):
+        self.load_state_dict(param_dict)
+        
+        h_out = (torch.zeros([1, 1, hidden_size], dtype=torch.float32, device=self.device),
+                    torch.zeros([1, 1, hidden_size],  dtype=torch.float32, device=self.device))
+        s = self.env.reset(test=True)
+        done = False
+
+        while not done:
+            h_in = h_out
+            prob, v, h_out = self.forward(torch.from_numpy(s).to(
+                dtype=torch.float32, device=self.device), h_in)
+            prob = prob.view(-1)
+
+            a = torch.argmax(prob).item()
+            s_next, r, done, info = env.step(a - 1)  # -1, 0, 1
+
+            s = s_next
+
+        print(info)
 
 
 def save_to_file(file_name, contents):
@@ -229,25 +251,36 @@ def save_to_file(file_name, contents):
     fh.close()
 
 
-# for train
 if __name__ == "__main__":
     torch.set_printoptions(precision=7, threshold=10000000)
 
     dailyOhlcvFile = sys.argv[1]
+    command = sys.argv[2]
     env = TradingEnv(dailyOhlcvFile)
 
     agent = PPO(env)
-    agent.train()
+    if command == 'train':
+        agent.train()
+    elif command == 'test':
+        agent.test()
+        
+def myStrategy(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
+    # load param
+    model = PPO()
+    model.load_state_dict(param_dict)
 
-    # for test
-    # s = env.reset()
-    # while True:
-    #     d = False
-    #     while not d:
-    #         a = random.choice([-1, 0, 1])
-    #         s, r, d, i = env.step(a)
-    #     print(i)
-
+    # log diff
+    windowsSize = 200
+    pastData = dailyOhlcvFile[feature_list].tail(windowsSize+1).values.astype(np.float32)
+    pastData = np.log(pastData[1:]) - np.log(pastData[:-1])
+    pastData = torch.from_numpy(pastData).to(
+        dtype=torch.float32, device=model.device).unsqueeze(1)
+    
+    # infer
+    pi, _, _ = model(pastData, None)
+    action = torch.argmax(pi[-1].view(-1)) - 1
+    return action
+    
 
 def cal_rsi(pastData):
     sma_u = 0
@@ -288,22 +321,3 @@ def myStrategy_rsi(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
         return -1
     else:
         return 0
-
-
-def myStrategy(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
-    # load param
-    model = PPO(None)
-    model.load_state_dict(param_dict)
-
-    # log diff
-    windowsSize = 200
-    pastData = dailyOhlcvFile.tail(windowsSize + 1)[feature_list]
-    pastData = (np.log(pastData) - np.log(pastData.shift(1))
-                ).values[1:].astype(np.float32)
-    pastData = torch.from_numpy(pastData).to(
-        dtype=torch.float32, device=model.device).unsqueeze(1)
-
-    # infer
-    pi, _, _ = model(pastData, None)
-    action = torch.argmax(pi[-1][0]).item() - 1
-    return action
