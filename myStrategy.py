@@ -250,7 +250,7 @@ class PPO(nn.Module):
 
 def save_to_file(file_name, contents):
     fh = open(file_name, 'w')
-    fh.write("from collections import OrderedDict\nfrom torch import tensor\n")
+    fh.write("from collections import OrderedDict\nfrom torch import tensor\n\nparam_dict = ")
     fh.write(contents)
     fh.close()
 
