@@ -16,7 +16,7 @@ feature_list = ["open", "high", "low", "close", "volume"]
 transFee = 100
 capital = 500000
 
-hidden_size = 64
+hidden_size = 24
 learning_rate = 1e-4
 gamma = 0.99
 lmbda = 0.95
@@ -89,7 +89,8 @@ class PPO(nn.Module):
         super(PPO, self).__init__()
         self.data = []
 
-        self.lstm = nn.LSTM(len(feature_list), hidden_size)
+        self.fc1 = nn.Linear(len(feature_list), hidden_size)
+        self.lstm = nn.LSTM(hidden_size, hidden_size)
         self.fc2 = nn.Linear(hidden_size, hidden_size)
 
         self.fc_pi = nn.Linear(hidden_size, 3)
@@ -104,7 +105,8 @@ class PPO(nn.Module):
         self.env = env
 
     def forward(self, x, hidden):
-        x = x.view(-1, 1, len(feature_list))
+        x = F.relu(self.fc1(x))
+        x = x.view(-1, 1, hidden)
         x, lstm_hidden = self.lstm(x, hidden)
         x = F.relu(self.fc2(x))
 
