@@ -106,8 +106,8 @@ class PPO(nn.Module):
 
     def forward(self, x, hidden):
         x = F.relu(self.fc1(x))
-        x = x.view(-1, 1, hidden)
-        x, lstm_hidden = self.lstm(x, hidden)
+        x = x.view(-1, 1, hidden_size)
+        x, lstm_hidden = self.lstm(x, hidden_size)
         x = F.relu(self.fc2(x))
 
         pi = self.fc_pi(x)
