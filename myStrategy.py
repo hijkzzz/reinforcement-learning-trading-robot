@@ -10,7 +10,6 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.distributions import Categorical
 
-from params import param_dict
 filename = 'params.py'
 
 feature_list = ["open", "high", "low", "close", "volume"]
@@ -224,6 +223,7 @@ class PPO(nn.Module):
             save_to_file(filename, str(self.state_dict()))
 
     def test(self):
+        from params import param_dict
         self.load_state_dict(param_dict)
 
         h_out = (torch.zeros([1, 1, hidden_size], dtype=torch.float32, device=self.device),
@@ -267,6 +267,7 @@ if __name__ == "__main__":
 
 
 def myStrategy(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
+    from params import param_dict
     # load param
     model = PPO()
     model.load_state_dict(param_dict)
