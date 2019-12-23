@@ -45,9 +45,9 @@ class TradingEnv:
 
         if not test:
             # random start point
-            self.cur_index = random.randint(1, nsteps)
+            self.cur_index = random.randint(2, nsteps)
         else:
-            self.cur_index = 1
+            self.cur_index = 2
 
         return self._observation(self.cur_index)
 
@@ -272,7 +272,7 @@ if __name__ == "__main__":
         agent.test()
 
 
-def myStrategy2(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
+def myStrategy(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
     from params import param_dict
     # load param
     model = PPO()
@@ -295,45 +295,3 @@ def myStrategy2(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
     pi, _, _ = model(pastData, None)
     action = torch.argmax(pi[-1].view(-1)) - 1
     return action
-
-
-def cal_rsi(pastData):
-    sma_u = 0
-    sma_d = 0
-    dataLen = len(pastData)
-
-    for i in range(dataLen-1):
-        if pastData[i] <= pastData[i+1]:
-            sma_u += (pastData[i+1]-pastData[i])
-        else:
-            sma_d += (pastData[i]-pastData[i+1])
-
-    rsi = sma_u / (sma_d + sma_u)
-    return rsi
-
-
-def myStrategy(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
-    pastData = np.hstack((
-        dailyOhlcvFile["open"].values.astype(np.float32), [openPrice]))
-
-    longWindowSize = 72
-    shortWindowSize = 18
-    windowSize = 4
-    buyRsi = 0.3
-    sellRsi = 0.1
-
-    if len(pastData) < max(longWindowSize + 1, windowSize):
-        return 0
-
-    rsi = cal_rsi(pastData[-windowSize:])
-    longRsiPre, longRsi = cal_rsi(
-        pastData[-longWindowSize - 1:-1]), cal_rsi(pastData[-longWindowSize:])
-    shortRsiPre, shortRsi = cal_rsi(
-        pastData[-shortWindowSize - 1:-1]), cal_rsi(pastData[-shortWindowSize:])
-
-    if rsi > buyRsi and shortRsi > longRsi and shortRsiPre < longRsiPre:
-        return 1
-    elif rsi < sellRsi and shortRsi < longRsi and shortRsiPre > longRsiPre:
-        return -1
-    else:
-        return 0
