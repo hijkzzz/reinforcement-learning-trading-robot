@@ -23,7 +23,7 @@ gamma = 0.99
 lmbda = 0.95
 clip = 0.1
 ent = 1e-3
-epoch = 1
+epoch = 2
 nsteps = 200
 neps = 100000
 
