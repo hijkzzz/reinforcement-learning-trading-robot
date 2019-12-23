@@ -17,13 +17,13 @@ transFee = 100
 capital = 500000
 
 hidden_size = 64
-input_size = hidden_size // 2
+input_size = hidden_size
 learning_rate = 1e-4
 gamma = 0.99
 lmbda = 0.95
 clip = 0.1
 ent = 1e-3
-epoch = 4
+epoch = 1
 nsteps = 200
 neps = 100000
 
