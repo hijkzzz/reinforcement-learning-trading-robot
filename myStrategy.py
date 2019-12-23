@@ -16,7 +16,8 @@ feature_list = ["open", "high", "low", "close", "volume"]
 transFee = 100
 capital = 500000
 
-hidden_size = 64
+hidden_size = 128
+input_size = hidden_size // 2
 learning_rate = 1e-4
 gamma = 0.99
 lmbda = 0.95
@@ -31,9 +32,9 @@ class TradingEnv:
     def __init__(self, dailyOhlcvFile):
         self.dailyOhlcv = pd.read_csv(dailyOhlcvFile)
 
-        self.diffOhlcv = (np.log(self.dailyOhlcv[feature_list])
-                          - np.log(self.dailyOhlcv[feature_list].shift(1)))\
-            .values.astype(np.float32)
+        diffOhlcv = self.dailyOhlcv[feature_list].values.astype(np.float32)
+        diffOhlcv = np.log(diffOhlcv[1:]) - np.log(diffOhlcv[:-1])
+        self.diffOhlcv = np.vstack(([0] * len(feature_list), diffOhlcv))
 
         self.reset()
 
@@ -44,9 +45,9 @@ class TradingEnv:
 
         if not test:
             # random start point
-            self.cur_index = random.randint(2, nsteps)
+            self.cur_index = random.randint(1, nsteps)
         else:
-            self.cur_index = 2
+            self.cur_index = 1
 
         return self._observation(self.cur_index)
 
@@ -82,6 +83,7 @@ class TradingEnv:
         return (return_rate - pre_return_rate) * 100
 
     def _observation(self, today):
+        # align
         return np.hstack((self.diffOhlcv[today-1], [self.diffOhlcv[today][0]]))
 
 
@@ -90,8 +92,8 @@ class PPO(nn.Module):
         super(PPO, self).__init__()
         self.data = []
 
-        self.fc1 = nn.Linear(len(feature_list) + 1, hidden_size)
-        self.lstm = nn.LSTM(hidden_size, hidden_size)
+        self.fc1 = nn.Linear(len(feature_list) + 1, input_size)
+        self.lstm = nn.LSTM(input_size, hidden_size)
         self.fc2 = nn.Linear(hidden_size, hidden_size)
 
         self.fc_pi = nn.Linear(hidden_size, 3)
@@ -107,7 +109,7 @@ class PPO(nn.Module):
 
     def forward(self, x, hidden):
         x = F.relu(self.fc1(x))
-        x = x.view(-1, 1, hidden_size)
+        x = x.view(-1, 1, input_size)
         x, lstm_hidden = self.lstm(x, hidden)
         x = F.relu(self.fc2(x))
 
@@ -250,7 +252,8 @@ class PPO(nn.Module):
 
 def save_to_file(file_name, contents):
     fh = open(file_name, 'w')
-    fh.write("from collections import OrderedDict\nfrom torch import tensor\n\nparam_dict = ")
+    fh.write(
+        "from collections import OrderedDict\nfrom torch import tensor\n\nparam_dict = ")
     fh.write(contents)
     fh.close()
 
@@ -310,7 +313,8 @@ def cal_rsi(pastData):
 
 
 def myStrategy_rsi(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
-    pastData = dailyOhlcvFile["open"].values.astype(np.float32)
+    pastData = np.hstack(
+        dailyOhlcvFile["open"].values.astype(np.float32), [openPrice])
 
     longWindowSize = 72
     shortWindowSize = 18
