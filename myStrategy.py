@@ -44,9 +44,9 @@ class TradingEnv:
 
         if not test:
             # random start point
-            self.cur_index = random.randint(1, nsteps)
+            self.cur_index = random.randint(2, nsteps)
         else:
-            self.cur_index = 1
+            self.cur_index = 2
 
         return self._observation(self.cur_index)
 
@@ -82,7 +82,7 @@ class TradingEnv:
         return (return_rate - pre_return_rate) * 100
 
     def _observation(self, today):
-        return self.diffOhlcv[today-1]
+        return self.diffOhlcv[today-2]
 
 
 class PPO(nn.Module):
