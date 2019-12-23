@@ -272,7 +272,7 @@ if __name__ == "__main__":
         agent.test()
 
 
-def myStrategy(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
+def myStrategy2(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
     from params import param_dict
     # load param
     model = PPO()
@@ -312,9 +312,9 @@ def cal_rsi(pastData):
     return rsi
 
 
-def myStrategy_rsi(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
-    pastData = np.hstack(
-        dailyOhlcvFile["open"].values.astype(np.float32), [openPrice])
+def myStrategy(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
+    pastData = np.hstack((
+        dailyOhlcvFile["open"].values.astype(np.float32), [openPrice]))
 
     longWindowSize = 72
     shortWindowSize = 18
