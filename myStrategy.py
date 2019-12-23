@@ -33,8 +33,7 @@ class TradingEnv:
         self.dailyOhlcv = pd.read_csv(dailyOhlcvFile)
 
         diffOhlcv = self.dailyOhlcv[feature_list].values.astype(np.float32)
-        diffOhlcv = np.log(diffOhlcv[1:]) - np.log(diffOhlcv[:-1])
-        self.diffOhlcv = np.vstack(([0] * len(feature_list), diffOhlcv))
+        self.diffOhlcv = np.log(diffOhlcv[1:]) - np.log(diffOhlcv[:-1])
 
         self.reset()
 
@@ -83,8 +82,7 @@ class TradingEnv:
         return (return_rate - pre_return_rate) * 100
 
     def _observation(self, today):
-        # align
-        return np.hstack((self.diffOhlcv[today-1], [self.diffOhlcv[today][0]]))
+        return self.diffOhlcv[today-2]
 
 
 class PPO(nn.Module):
@@ -92,7 +90,7 @@ class PPO(nn.Module):
         super(PPO, self).__init__()
         self.data = []
 
-        self.fc1 = nn.Linear(len(feature_list) + 1, input_size)
+        self.fc1 = nn.Linear(len(feature_list), input_size)
         self.lstm = nn.LSTM(input_size, hidden_size)
         self.fc2 = nn.Linear(hidden_size, hidden_size)
 
@@ -283,11 +281,7 @@ def myStrategy(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
     dailyOhlcv = dailyOhlcvFile[feature_list].tail(
         windowsSize+1).values.astype(np.float32)
 
-    diff1 = np.log(dailyOhlcv[1:]) - np.log(dailyOhlcv[:-1])
-    diff2 = np.log(
-        np.hstack((dailyOhlcv[2:, 0], [openPrice]))) - np.log(dailyOhlcv[1:, 0])
-
-    pastData = np.hstack((diff1, diff2[:, np.newaxis]))
+    pastData = np.log(dailyOhlcv[1:]) - np.log(dailyOhlcv[:-1])
     pastData = torch.from_numpy(pastData).to(
         dtype=torch.float32, device=model.device).unsqueeze(1)
 
