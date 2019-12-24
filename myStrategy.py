@@ -40,7 +40,7 @@ class TradingEnv:
     def reset(self, test=False):
         self.cur_capital = capital
         self.holding = 0
-        self.pre_return_rate = 0
+        self.pre_total = self.cur_capital
 
         if not test:
             # random start point
@@ -51,10 +51,9 @@ class TradingEnv:
         return self._observation(self.cur_index)
 
     def step(self, action):
-        done = (self.cur_index == len(self.dailyOhlcv) - 2)
-
         cur_price, next_price = self.dailyOhlcv.loc[self.cur_index:self.cur_index+1, [
             "open"]].values.astype(np.float32)[:, 0]
+
         if action == 1 and self.cur_capital > transFee:
             self.holding = (self.cur_capital - transFee) / cur_price
             self.cur_capital = 0
@@ -62,15 +61,11 @@ class TradingEnv:
             self.cur_capital = self.holding * cur_price - transFee
             self.holding = 0
 
-        return_rate = (self.cur_capital + self.holding *
-                       cur_price) / capital - 1
-        next_return_rate = (self.cur_capital + self.holding *
-                            next_price) / capital - 1
-        reward = self._reward(return_rate, next_return_rate)
-
+        reward = self._reward(cur_price, next_price)
         info = {'capital': self.cur_capital,
-                'holding': self.holding, 'return_rate': return_rate}
+                'holding': self.holding, 'return_rate': self.pre_total / capital - 1}
 
+        done = (self.cur_index == len(self.dailyOhlcv) - 2)
         if not done:
             next_obs = self._observation(self.cur_index)
         else:
@@ -79,8 +74,11 @@ class TradingEnv:
         self.cur_index += 1
         return next_obs, reward, done, info
 
-    def _reward(self, pre_return_rate, return_rate):
-        return np.sign(return_rate - pre_return_rate)
+    def _reward(self, cur_price, next_price):
+        cur_total = self.cur_capital + self.holding * next_price
+        reward =  (cur_total / self.pre_total - 1) * 100
+        self.pre_total = cur_total
+        return reward
 
     def _observation(self, today):
         return np.hstack((self.diffOhlcv[today-1], [self.diffOhlcv[today][0]]))
