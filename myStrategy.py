@@ -17,7 +17,6 @@ transFee = 100
 capital = 500000
 
 hidden_size = 64
-input_size = hidden_size
 learning_rate = 1e-4
 gamma = 0.99
 lmbda = 0.95
@@ -32,8 +31,9 @@ class TradingEnv:
     def __init__(self, dailyOhlcvFile):
         self.dailyOhlcv = pd.read_csv(dailyOhlcvFile)
 
-        diffOhlcv = self.dailyOhlcv[feature_list].values.astype(np.float32)
-        self.diffOhlcv = np.log(diffOhlcv[1:]) - np.log(diffOhlcv[:-1])
+        self.diffOhlcv = (np.log(self.dailyOhlcv[feature_list])
+                          - np.log(self.dailyOhlcv[feature_list].shift(1)))\
+            .values.astype(np.float32)
 
         self.reset()
 
@@ -82,7 +82,7 @@ class TradingEnv:
         return (return_rate - pre_return_rate) * 100
 
     def _observation(self, today):
-        return self.diffOhlcv[today-2]
+        return np.hstack((self.diffOhlcv[today-1], [self.diffOhlcv[today][0]]))
 
 
 class PPO(nn.Module):
@@ -90,8 +90,8 @@ class PPO(nn.Module):
         super(PPO, self).__init__()
         self.data = []
 
-        self.fc1 = nn.Linear(len(feature_list), input_size)
-        self.lstm = nn.LSTM(input_size, hidden_size)
+        self.fc1 = nn.Linear(len(feature_list) + 1, hidden_size)
+        self.lstm = nn.LSTM(hidden_size, hidden_size)
         self.fc2 = nn.Linear(hidden_size, hidden_size)
 
         self.fc_pi = nn.Linear(hidden_size, 3)
@@ -107,7 +107,7 @@ class PPO(nn.Module):
 
     def forward(self, x, hidden):
         x = F.relu(self.fc1(x))
-        x = x.view(-1, 1, input_size)
+        x = x.view(-1, 1, hidden_size)
         x, lstm_hidden = self.lstm(x, hidden)
         x = F.relu(self.fc2(x))
 
@@ -250,8 +250,7 @@ class PPO(nn.Module):
 
 def save_to_file(file_name, contents):
     fh = open(file_name, 'w')
-    fh.write(
-        "from collections import OrderedDict\nfrom torch import tensor\n\nparam_dict = ")
+    fh.write("from collections import OrderedDict\nfrom torch import tensor\n\nparam_dict = ")
     fh.write(contents)
     fh.close()
 
@@ -281,7 +280,11 @@ def myStrategy(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
     dailyOhlcv = dailyOhlcvFile[feature_list].tail(
         windowsSize+1).values.astype(np.float32)
 
-    pastData = np.log(dailyOhlcv[1:]) - np.log(dailyOhlcv[:-1])
+    diff1 = np.log(dailyOhlcv[1:]) - np.log(dailyOhlcv[:-1])
+    diff2 = np.log(
+        np.hstack((dailyOhlcv[2:, 0], [openPrice]))) - np.log(dailyOhlcv[1:, 0])
+
+    pastData = np.hstack((diff1, diff2[:, np.newaxis]))
     pastData = torch.from_numpy(pastData).to(
         dtype=torch.float32, device=model.device).unsqueeze(1)
 
@@ -289,3 +292,44 @@ def myStrategy(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
     pi, _, _ = model(pastData, None)
     action = torch.argmax(pi[-1].view(-1)) - 1
     return action
+
+
+def cal_rsi(pastData):
+    sma_u = 0
+    sma_d = 0
+    dataLen = len(pastData)
+
+    for i in range(dataLen-1):
+        if pastData[i] <= pastData[i+1]:
+            sma_u += (pastData[i+1]-pastData[i])
+        else:
+            sma_d += (pastData[i]-pastData[i+1])
+
+    rsi = sma_u / (sma_d + sma_u)
+    return rsi
+
+
+def myStrategy_rsi(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
+    pastData = dailyOhlcvFile["open"].values.astype(np.float32)
+
+    longWindowSize = 72
+    shortWindowSize = 18
+    windowSize = 4
+    buyRsi = 0.3
+    sellRsi = 0.1
+
+    if len(pastData) < max(longWindowSize + 1, windowSize):
+        return 0
+
+    rsi = cal_rsi(pastData[-windowSize:])
+    longRsiPre, longRsi = cal_rsi(
+        pastData[-longWindowSize - 1:-1]), cal_rsi(pastData[-longWindowSize:])
+    shortRsiPre, shortRsi = cal_rsi(
+        pastData[-shortWindowSize - 1:-1]), cal_rsi(pastData[-shortWindowSize:])
+
+    if rsi > buyRsi and shortRsi > longRsi and shortRsiPre < longRsiPre:
+        return 1
+    elif rsi < sellRsi and shortRsi < longRsi and shortRsiPre > longRsiPre:
+        return -1
+    else:
+        return 0
