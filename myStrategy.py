@@ -31,7 +31,7 @@ class TradingEnv:
     def __init__(self, dailyOhlcvFile):
         self.dailyOhlcv = pd.read_csv(dailyOhlcvFile)
 
-        diff1 = dailyOhlcvFile[feature_list].values.astype(np.float32)
+        diff1 = self.dailyOhlcv[feature_list].values.astype(np.float32)
         diff1 = np.log(diff1[1:]) - np.log(diff1[:-1])
         self.diffOhlcv = np.vstack((diff1[0] * 0, diff1))
 
