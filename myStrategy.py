@@ -76,7 +76,7 @@ class TradingEnv:
 
     def _reward(self, cur_price, next_price):
         cur_total = self.cur_capital + self.holding * next_price
-        reward =  (cur_total / self.pre_total - 1) * 100
+        reward =  (cur_total - self.pre_total) / capital * 100
         self.pre_total = cur_total
         return reward
 
