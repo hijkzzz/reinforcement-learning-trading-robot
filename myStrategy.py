@@ -53,8 +53,8 @@ class TradingEnv:
     def step(self, action):
         done = (self.cur_index == len(self.dailyOhlcv) - 2)
 
-        cur_price = self.dailyOhlcv.loc[self.cur_index, [
-            "open"]].values.astype(np.float32)[0]
+        cur_price, next_price = list(self.dailyOhlcv.loc[self.cur_index:self.cur_index+1, [
+            "open"]].values.astype(np.float32))
         if action == 1 and self.cur_capital > transFee:
             self.holding = (self.cur_capital - transFee) / cur_price
             self.cur_capital = 0
@@ -64,8 +64,9 @@ class TradingEnv:
 
         return_rate = (self.cur_capital + self.holding *
                        cur_price) / capital - 1
-        reward = self._reward(self.pre_return_rate, return_rate)
-        self.pre_return_rate = return_rate
+        next_return_rate = (self.cur_capital + self.holding *
+                            next_price) / capital - 1
+        reward = self._reward(return_rate, next_return_rate)
 
         info = {'capital': self.cur_capital,
                 'holding': self.holding, 'return_rate': return_rate}
@@ -79,7 +80,7 @@ class TradingEnv:
         return next_obs, reward, done, info
 
     def _reward(self, pre_return_rate, return_rate):
-        return np.sign((return_rate - pre_return_rate) * 100)
+        return np.sign(return_rate - pre_return_rate)
 
     def _observation(self, today):
         return np.hstack((self.diffOhlcv[today-1], [self.diffOhlcv[today][0]]))
@@ -250,7 +251,8 @@ class PPO(nn.Module):
 
 def save_to_file(file_name, contents):
     fh = open(file_name, 'w')
-    fh.write("from collections import OrderedDict\nfrom torch import tensor\n\nparam_dict = ")
+    fh.write(
+        "from collections import OrderedDict\nfrom torch import tensor\n\nparam_dict = ")
     fh.write(contents)
     fh.close()
 
