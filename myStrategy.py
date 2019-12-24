@@ -63,7 +63,7 @@ class TradingEnv:
 
         reward = self._reward(cur_price, next_price)
         info = {'capital': self.cur_capital,
-                'holding': self.holding, 'return_rate': cur_total / capital - 1}
+                'holding': self.holding, 'return_rate': self.pre_total / capital - 1}
 
         done = (self.cur_index == len(self.dailyOhlcv) - 2)
         if not done:
