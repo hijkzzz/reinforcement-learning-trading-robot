@@ -53,8 +53,8 @@ class TradingEnv:
     def step(self, action):
         done = (self.cur_index == len(self.dailyOhlcv) - 2)
 
-        cur_price, next_price = list(self.dailyOhlcv.loc[self.cur_index:self.cur_index+1, [
-            "open"]].values.astype(np.float32))
+        cur_price, next_price = self.dailyOhlcv.loc[self.cur_index:self.cur_index+1, [
+            "open"]].values.astype(np.float32)[:, 0]
         if action == 1 and self.cur_capital > transFee:
             self.holding = (self.cur_capital - transFee) / cur_price
             self.cur_capital = 0
