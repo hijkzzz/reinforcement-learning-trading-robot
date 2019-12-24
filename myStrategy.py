@@ -16,7 +16,7 @@ feature_list = ["open", "high", "low", "close", "volume"]
 transFee = 100
 capital = 500000
 
-hidden_size = 64
+hidden_size = 128
 learning_rate = 1e-4
 gamma = 0.99
 lmbda = 0.95
@@ -31,9 +31,9 @@ class TradingEnv:
     def __init__(self, dailyOhlcvFile):
         self.dailyOhlcv = pd.read_csv(dailyOhlcvFile)
 
-        self.diffOhlcv = (np.log(self.dailyOhlcv[feature_list])
-                          - np.log(self.dailyOhlcv[feature_list].shift(1)))\
-            .values.astype(np.float32)
+        diff1 = dailyOhlcvFile[feature_list].values.astype(np.float32)
+        diff1 = np.log(diff1[1:]) - np.log(diff1[:-1])
+        self.diffOhlcv = np.vstack((diff1[0] * 0, diff1))
 
         self.reset()
 
@@ -79,7 +79,7 @@ class TradingEnv:
         return next_obs, reward, done, info
 
     def _reward(self, pre_return_rate, return_rate):
-        return (return_rate - pre_return_rate) * 100
+        return np.sign((return_rate - pre_return_rate) * 100)
 
     def _observation(self, today):
         return np.hstack((self.diffOhlcv[today-1], [self.diffOhlcv[today][0]]))
