@@ -4,7 +4,7 @@ import pandas as pd
 from myStrategy import myStrategy
 
 dailyOhlcv = pd.read_csv(sys.argv[1])
-minutelyOhlcv = pd.read_csv(sys.argv[2])
+# minutelyOhlcv = pd.read_csv(sys.argv[2])
 capital = 500000.0
 capitalOrig=capital
 transFee = 100
@@ -20,8 +20,7 @@ for ic in range(evalDays,0,-1):
     dailyOhlcvFile = dailyOhlcv.head(len(dailyOhlcv)-ic)
     dateStr = dailyOhlcvFile.iloc[-1,0]
     # minutelyOhlcvFile = minutelyOhlcv.head((np.where(minutelyOhlcv.iloc[:,0].str.split(expand=True)[0].values==dateStr))[0].max()+1)
-    minutelyOhlcvFile = None
-    action[evalDays-ic] = myStrategy(dailyOhlcvFile,minutelyOhlcvFile,openPricev[evalDays-ic])
+    action[evalDays-ic] = myStrategy(dailyOhlcvFile,None,openPricev[evalDays-ic])
     currPrice = openPricev[evalDays-ic]
     if action[evalDays-ic] == 1:
         if Holding == 0 and capital > transFee:
