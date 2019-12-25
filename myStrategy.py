@@ -192,6 +192,8 @@ class PPO(nn.Module):
             return {"pi_loss": pi_loss.item(), "v_loss": v_loss.item(), "ent_loss": ent_loss.item()}
 
     def train(self):
+        best_return_rate = 0
+        
         for n_epi in range(neps):
             h_out = (torch.zeros([1, 1, hidden_size], dtype=torch.float32, device=self.device),
                      torch.zeros([1, 1, hidden_size],  dtype=torch.float32, device=self.device))
@@ -222,7 +224,9 @@ class PPO(nn.Module):
             print(loss_info)
             print(info)
 
-            save_to_file(filename, str(self.state_dict()))
+            if info['return_rate'] > best_return_rate:
+                best_return_rate = info['return_rate']
+                save_to_file(filename, str(self.state_dict()))
 
     def test(self):
         from params import param_dict
@@ -276,7 +280,7 @@ def myStrategy(dailyOhlcvFile, minutelyOhlcvFile, openPrice):
     model.load_state_dict(param_dict)
 
     # log diff
-    windowsSize = 200
+    windowsSize = 365
     dailyOhlcv = dailyOhlcvFile[feature_list].tail(
         windowsSize+1).values.astype(np.float32)
 
